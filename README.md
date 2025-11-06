@@ -1,204 +1,311 @@
-queuectl — CLI Background Job Queue
+# queuectl — CLI Background Job Queue (Java + Spring Boot + Picocli + SQLite)
 
-Java + Spring Boot + Picocli + SQLite
+A production-grade background job queue system inspired by Sidekiq, Celery, and Resque — but built entirely using Java, Spring Boot, Picocli, and SQLite.
 
-A lightweight, production-grade background job queue system with:
+---
 
-Persistent job storage (SQLite)
-Multi-worker execution
-Exponential backoff retries
-Dead Letter Queue (DLQ)
-Graceful shutdown
-Configurable retry/backoff parameters
-Clean CLI built with Picocli
+## Features
 
-Requirements
+* Persistent job storage (SQLite)
+* Multiple worker processes
+* Exponential backoff retries
+* Dead Letter Queue (DLQ)
+* Job priority + scheduled `run_at` support
+* Job output logging (`job-logs/<jobId>.log`)
+* Metrics: completed jobs, retries today, avg attempts, etc.
+* Clean CLI interface via Picocli
+* Graceful worker shutdown
+* Fully restart-safe
 
-Java 17+
+---
 
-Maven 3.9+
+## 1. Setup Instructions
 
-Works on Windows, macOS, and Linux
+### Requirements
 
-Setup Instructions
-1] Build the project
-mvn -q -DskipTests package
+* Java 17+
+* Maven 3.9+
+* Windows / macOS / Linux supported
 
-2️] (Optional) Create an alias
+### Build the application
 
-Linux/macOS
+```
+./mvnw clean package -DskipTests
+```
 
+### Create a shortcut (optional)
+
+Linux/macOS:
+
+```
 alias queuectl='java -jar target/queuectl-1.0.0.jar'
+```
 
+Windows PowerShell: use a function instead of `alias`.
 
-Windows PowerShell
+---
 
-function queuectl { java -jar "target/queuectl-1.0.0.jar" @args }
+## 2. How to Run queuectl Using Two Terminals (IMPORTANT)
 
-Usage Examples
-1] Enqueue Jobs
+`queuectl` works like real job queues (Sidekiq, Celery), so **workers must run continuously**.
+
+### Terminal A → Worker Terminal (leave running)
+
+Start workers:
+
+```
+queuectl worker start --count 2
+```
+
+Worker output:
+
+```
+Starting 2 worker(s)...
+w-0 completed <jobId>
+w-1 scheduled retry for <jobId> in 4 seconds
+```
+
+Keep this terminal open. Do NOT run other commands here.
+
+### Terminal B → Command Terminal
+
+Use this terminal for:
+
+* Enqueue jobs
+* Check status
+* List jobs
+* Retry DLQ jobs
+* View logs
+* Change config
+
+Examples:
+
+```
 queuectl enqueue --command "echo Hello" --max-retries 3
-queuectl enqueue --command "sleep 2" --priority 10
-queuectl enqueue '{"id":"j1","command":"echo JSON payload","max_retries":2}'
-
-2] Start & Stop Workers
-queuectl worker start --count 3     # Run 3 workers
-queuectl worker stop                # Gracefully stop
-
-3] Job Inspection
-queuectl status                     # Summary
-queuectl list --state pending       # List only pending jobs
-queuectl dlq list                   # Dead Letter Queue
-queuectl dlq retry <jobId>          # Retry a dead job
-
-Configuration
+queuectl list --state pending
+queuectl status
+queuectl dlq list
+queuectl dlq retry <jobId>
 queuectl config get
 queuectl config set backoff-base 3
-queuectl config set max-retries 5
+```
 
-Execution Model
-Workers:
-Poll for pending jobs eligible to run (run_at <= now)
-Claim a job atomically using an SQL UPDATE with conditions:
+Correct usage:
+**Terminal A → workers**
+**Terminal B → commands**
 
-UPDATE jobs 
-SET state='processing', locked_by=?, locked_until=NOW+5min 
-WHERE id=? AND state='pending' AND lock expired
+---
 
-Run command via:
+## 3. Usage Examples
 
-Windows: cmd /c <command>
+### Enqueue jobs
 
-Linux/macOS: bash -lc <command>
-
-Send heartbeats to workers table
-
-Respect global stop flag
-
-Backoff
-delaySeconds = backoff_base ^ attempts
-
-
-backoff_base is configurable via CLI.
-
-✅ Persistence
-
-SQLite database: queue.db
-
-Automatically created with schema from schema.sql
-
-WAL mode enabled for durability
-
-Jobs survive restart
-
-Workers stop and resume safely without corruption
-
-⚙️ Assumptions & Trade-offs
-✅ SQLite is ideal for single-machine, simple deployments.
-
-For multi-node clusters, switch to PostgreSQL with SKIP LOCKED.
-
-✅ Workers run in foreground
-
-Useful for debugging.
-A systemd service (or Windows service) can wrap worker start.
-
-✅ Backoff strategy is exponential only
-
-Could extend to:
-
-jitter
-
-fixed delay
-
-linear backoff
-
-✅ Output is printed to stdout
-
-Not persisted; could be stored for auditing in a future version.
-
-✅ Jobs run locally on OS shell
-
-Sandboxing (Docker, chroot) not included for simplicity.
-
-✅ Testing Instructions
-
-You MUST validate the following before submission:
-
-✅ 1. Basic Job Execution
-queuectl enqueue --command "echo Hello"
-queuectl worker start --count 1
-
-
-Expected: Job completes.
-
-✅ 2. Retry + Dead Letter Queue
+```
+queuectl enqueue --command "echo Hi"
 queuectl enqueue --command "exit 1" --max-retries 2
-queuectl worker start --count 1
+queuectl enqueue '{"command":"echo JSON style","priority":10}'
+```
 
+### Start / Stop Workers
 
-Expected:
+```
+queuectl worker start --count 3
+queuectl worker stop
+```
 
-Attempts increase
+### Status
 
-Job moves to DLQ after final failure
-Check:
+```
+queuectl status
+```
 
+Example:
+
+```
+Jobs: {completed=4, pending=1, dead=1}
+Active workers: 2
+Config: base=2, defaultMaxRetries=3
+Metrics: completedLast5m=1, avgAttemptsCompleted=0.00, retriesToday=3
+Logs: outputs are written to job-logs/<jobId>.log
+```
+
+### List jobs
+
+```
+queuectl list
+queuectl list --state pending
+queuectl list --state dead
+```
+
+### Dead Letter Queue
+
+```
 queuectl dlq list
-
-✅ 3. Retry DLQ Job
 queuectl dlq retry <jobId>
-queuectl worker start --count 1
+```
 
-✅ 4. Parallel Workers
+### Config
+
+```
+queuectl config get
+queuectl config set max-retries 5
+queuectl config set backoff-base 4
+```
+
+### View job logs
+
+```
+Get-Content job-logs/<jobId>.log       # Windows
+cat job-logs/<jobId>.log               # Linux/macOS
+```
+
+---
+
+## 4. Architecture Overview
+
+### Core Components
+
+* SQLite database (`queue.db`)
+* Picocli CLI commands
+* Spring Boot DI + repositories
+* Workers execute shell commands asynchronously
+* JobRepository handles:
+
+  * row-mapping
+  * timestamps
+  * job claiming
+  * retry mechanics
+  * DLQ
+  * repairing stuck jobs
+
+### Job Lifecycle
+
+```
+pending
+   | (worker claims)
+processing
+   | success
+completed
+
+   | fail + retry allowed
+pending (scheduled with backoff)
+
+   | fail + attempts exceeded
+dead (DLQ)
+```
+
+### Key Features
+
+#### 1. Exponential Backoff
+
+```
+delay = base ^ attempts (seconds)
+```
+
+Default base = 2
+
+#### 2. Job Priority
+
+```
+ORDER BY priority DESC, created_at ASC
+```
+
+#### 3. Scheduled Jobs (`run_at`)
+
+Workers pick:
+
+```
+run_at <= now
+```
+
+#### 4. Output Logging
+
+```
+job-logs/<jobId>.log
+```
+
+#### 5. Graceful Shutdown
+
+`queuectl worker stop` sets a DB flag.
+Workers finish the current job, then exit.
+
+#### 6. Metrics
+
+* `completedLast5m`
+* `avgAttemptsCompleted`
+* `retriesToday`
+
+Displayed via:
+
+```
+queuectl status
+```
+
+---
+
+## 5. Assumptions & Trade-offs
+
+### Strengths
+
+* Single-node safe (SQLite WAL mode)
+* Durable without external dependencies
+* Workers run in foreground — simple deployment
+
+### Trade-offs
+
+* Multi-node setups require PostgreSQL
+* Job timeout behavior is minimal (expandable)
+* Logs stored in files (lightweight, not centralized)
+
+---
+
+## 6. Testing Instructions (Step-by-Step)
+
+### 1. Clean old data
+
+```
+rm queue.db
+rm -rf job-logs
+```
+
+### 2. Start workers in Terminal A
+
+```
+queuectl worker start --count 2
+```
+
+### 3. Enqueue jobs in Terminal B
+
+```
 queuectl enqueue --command "echo A"
 queuectl enqueue --command "echo B"
-queuectl worker start --count 2
+queuectl enqueue --command "exit 1" --max-retries 2
+```
 
+### 4. Check status
 
-Expected: Both run simultaneously.
+```
+queuectl status
+```
 
-✅ 5. Persistence Across Restart
-queuectl enqueue --command "sleep 5"
-# Kill terminal without stopping workers
-java -jar target/queuectl-1.0.0.jar status
+### 5. DLQ test
 
+```
+queuectl dlq list
+queuectl dlq retry <deadJobId>
+```
 
-Expected: Job is still present in DB.
+### 6. Check job logs
 
-📁 Project Structure
-src/
-  main/java/com/example/queuectl/
-    cli/          # All Picocli commands
-    core/         # Job logic, repository, worker engine
-    config/       # Global config, Picocli config
-resources/
-  schema.sql      # DB schema
-  application.yml # SQLite, retry base, defaults
-queue.db          # SQLite persistent file
+```
+cat job-logs/<jobId>.log
+```
 
-🧩 Bonus Features (Optional)
+---
 
-Job priorities ✅ (already supported)
+## Bonus Features Implemented
 
-Future ideas:
-
-Job timeouts / SIGKILL
-
-Job logs in DB
-
-Web dashboard
-
-Metrics (Prometheus)
-
-✅ Ready for Submission
-
-This README now meets all required evaluation criteria, including:
-
-✅ Setup instructions
-✅ Usage examples
-✅ Architecture overview
-✅ Assumptions & trade-offs
-✅ Testing instructions
-
-If you'd like, I can format this into a pretty GitHub README.md with emojis, badges, and colorful sections.
+* ✅ Job priority
+* ✅ Scheduled jobs (`run_at`)
+* ✅ Job output logging
+* ✅ Metrics (`status` command)
