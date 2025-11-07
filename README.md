@@ -1,6 +1,6 @@
 # queuectl — CLI Background Job Queue (Java + Spring Boot + Picocli + SQLite)
 
-A production-grade background job queue system inspired by Sidekiq, Celery, and Resque — but built entirely using Java, Spring Boot, Picocli, and SQLite.
+A production-grade background job queue system built entirely using Java, Spring Boot, Picocli, and SQLite.
 
 ---
 
@@ -32,16 +32,6 @@ A production-grade background job queue system inspired by Sidekiq, Celery, and 
 ```
 ./mvnw clean package -DskipTests
 ```
-
-### Create a shortcut (optional)
-
-Linux/macOS:
-
-```
-alias queuectl='java -jar target/queuectl-1.0.0.jar'
-```
-
-Windows PowerShell: use a function instead of `alias`.
 
 ---
 
@@ -305,7 +295,7 @@ cat job-logs/<jobId>.log
 
 ## Bonus Features Implemented
 
-* ✅ Job priority
-* ✅ Scheduled jobs (`run_at`)
-* ✅ Job output logging
-* ✅ Metrics (`status` command)
+* Job priority
+* Scheduled jobs (`run_at`)
+* Job output logging
+* Metrics (`status` command)
