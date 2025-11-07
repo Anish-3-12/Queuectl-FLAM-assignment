@@ -14,7 +14,7 @@ import java.util.Map;
 @Repository
 public class JobRepository {
     private final JdbcTemplate jdbc;
-    public JobRepository(JdbcTemplate jdbc){ this.jdbc=jdbc; }
+    public JobRepository(JdbcTemplate jdbc){ this.jdbc = jdbc; }
 
     private static final RowMapper<JobRecord> M = (rs, i) -> map(rs);
 
@@ -45,9 +45,8 @@ public class JobRepository {
 
             // SQLite default datetime: "yyyy-MM-dd HH:mm:ss" or with .SSS
             try {
-                java.time.format.DateTimeFormatter fmt =
-                        java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss[.SSS]");
-                java.time.LocalDateTime ldt = java.time.LocalDateTime.parse(s, fmt);
+                var fmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss[.SSS]");
+                var ldt = java.time.LocalDateTime.parse(s, fmt);
                 return ldt.atZone(java.time.ZoneId.systemDefault()).toInstant();
             } catch (Exception ignore) {}
         }
@@ -80,12 +79,12 @@ public class JobRepository {
     // ---------- CRUD ----------
     public void insert(JobRecord j){
         jdbc.update(
-            "INSERT INTO jobs(id,command,state,attempts,max_retries,created_at,updated_at,run_at,priority) " +
-            "VALUES(?,?,?,?,?,?,?,?,?)",
-            j.id(), j.command(), j.state().name(),
-            j.attempts(), j.maxRetries(),
-            ts(j.createdAt()), ts(j.updatedAt()), ts(j.runAt()),
-            j.priority()
+                "INSERT INTO jobs(id,command,state,attempts,max_retries,created_at,updated_at,run_at,priority) " +
+                        "VALUES(?,?,?,?,?,?,?,?,?)",
+                j.id(), j.command(), j.state().name(),
+                j.attempts(), j.maxRetries(),
+                ts(j.createdAt()), ts(j.updatedAt()), ts(j.runAt()),
+                j.priority()
         );
     }
 
@@ -104,48 +103,49 @@ public class JobRepository {
     public Map<String, Integer> countsByState(){
         Map<String,Integer> map = new LinkedHashMap<>();
         jdbc.query(
-            "SELECT state, COUNT(*) c FROM jobs GROUP BY state",
-            (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
-                while (rs.next()) {
-                    map.put(rs.getString("state"), rs.getInt("c"));
+                "SELECT state, COUNT(*) c FROM jobs GROUP BY state",
+                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> {
+                    while (rs.next()) {
+                        map.put(rs.getString("state"), rs.getInt("c"));
+                    }
+                    return null;
                 }
-                return null;
-            }
         );
         return map;
     }
 
     public int countActiveWorkers(){
         return jdbc.queryForObject(
-            "SELECT COUNT(*) FROM workers WHERE last_heartbeat > datetime('now','-30 seconds')",
-            Integer.class
+                "SELECT COUNT(*) FROM workers WHERE last_heartbeat > datetime('now','-30 seconds')",
+                Integer.class
         );
     }
 
     public void retryDead(String id){
         jdbc.update(
-            "UPDATE jobs SET state='pending', attempts=0, last_error=NULL, " +
-            "locked_by=NULL, locked_until=NULL, updated_at=datetime('now'), run_at=datetime('now') " +
-            "WHERE id=? AND state='dead'",
-            id
+                "UPDATE jobs SET state='pending', attempts=0, last_error=NULL, " +
+                        "locked_by=NULL, locked_until=NULL, updated_at=datetime('now'), run_at=datetime('now') " +
+                        "WHERE id=? AND state='dead'",
+                id
         );
     }
 
     // ---------- JOB CLAIMING ----------
+    /** Claim next available job for this worker (priority desc, FIFO within same priority). */
     public JobRecord claimNext(String workerName){
         List<String> ids = jdbc.queryForList(
-            "SELECT id FROM jobs WHERE state='pending' AND run_at <= datetime('now') " +
-            "AND (locked_until IS NULL OR locked_until < datetime('now')) " +
-            "ORDER BY priority DESC, created_at ASC LIMIT 5",
-            String.class
+                "SELECT id FROM jobs WHERE state='pending' AND run_at <= datetime('now') " +
+                        "AND (locked_until IS NULL OR locked_until < datetime('now')) " +
+                        "ORDER BY priority DESC, created_at ASC LIMIT 5",
+                String.class
         );
 
         for (String id : ids){
             int updated = jdbc.update(
-                "UPDATE jobs SET state='processing', locked_by=?, locked_until=datetime('now','+5 minutes'), " +
-                "updated_at=datetime('now') WHERE id=? AND state='pending' " +
-                "AND (locked_until IS NULL OR locked_until < datetime('now'))",
-                workerName, id
+                    "UPDATE jobs SET state='processing', locked_by=?, locked_until=datetime('now','+5 minutes'), " +
+                            "updated_at=datetime('now') WHERE id=? AND state='pending' " +
+                            "AND (locked_until IS NULL OR locked_until < datetime('now'))",
+                    workerName, id
             );
 
             if (updated == 1){
@@ -161,31 +161,31 @@ public class JobRepository {
 
     public void heartbeat(String workerName){
         jdbc.update(
-            "INSERT INTO workers(name,last_heartbeat) VALUES(?,datetime('now')) " +
-            "ON CONFLICT(name) DO UPDATE SET last_heartbeat=excluded.last_heartbeat",
-            workerName
+                "INSERT INTO workers(name,last_heartbeat) VALUES(?,datetime('now')) " +
+                        "ON CONFLICT(name) DO UPDATE SET last_heartbeat=excluded.last_heartbeat",
+                workerName
         );
     }
 
     public void complete(String id){
         jdbc.update(
-            "UPDATE jobs SET state='completed', locked_by=NULL, locked_until=NULL, updated_at=datetime('now') WHERE id=?",
-            id
+                "UPDATE jobs SET state='completed', locked_by=NULL, locked_until=NULL, updated_at=datetime('now') WHERE id=?",
+                id
         );
     }
 
     public void failAndScheduleRetry(String id, int attempts, int max, int delaySeconds, String error){
         if (attempts + 1 > max){
             jdbc.update(
-                "UPDATE jobs SET state='dead', attempts=?, last_error=?, locked_by=NULL, locked_until=NULL, " +
-                "updated_at=datetime('now') WHERE id=?",
-                attempts+1, truncate(error, 8000), id
+                    "UPDATE jobs SET state='dead', attempts=?, last_error=?, locked_by=NULL, locked_until=NULL, " +
+                            "updated_at=datetime('now') WHERE id=?",
+                    attempts+1, truncate(error, 8000), id
             );
         } else {
             jdbc.update(
-                "UPDATE jobs SET state='pending', attempts=?, last_error=?, locked_by=NULL, locked_until=NULL, " +
-                "run_at=datetime('now', ?), updated_at=datetime('now') WHERE id=?",
-                attempts+1, truncate(error, 8000), "+" + delaySeconds + " seconds", id
+                    "UPDATE jobs SET state='pending', attempts=?, last_error=?, locked_by=NULL, locked_until=NULL, " +
+                            "run_at=datetime('now', ?), updated_at=datetime('now') WHERE id=?",
+                    attempts+1, truncate(error, 8000), "+" + delaySeconds + " seconds", id
             );
         }
     }
@@ -196,9 +196,34 @@ public class JobRepository {
     }
 
     // ---------- REPAIR ----------
+    /** Unlock any jobs left in 'processing' (e.g., worker crashed). Returns number of repaired rows. */
     public int repairProcessing() {
         return jdbc.update(
-            "UPDATE jobs SET state='pending', locked_by=NULL, locked_until=NULL WHERE state='processing'"
+                "UPDATE jobs SET state='pending', locked_by=NULL, locked_until=NULL WHERE state='processing'"
         );
+    }
+
+    // ---------- SIMPLE METRICS (optional; no schema changes) ----------
+    public int completedLastMinutes(int minutes){
+        return jdbc.queryForObject(
+                "SELECT COUNT(*) FROM jobs WHERE state='completed' AND updated_at >= datetime('now', ?)",
+                Integer.class, "-" + minutes + " minutes"
+        );
+    }
+
+    public Double avgAttemptsCompleted(){
+        Double v = jdbc.queryForObject(
+                "SELECT AVG(attempts) FROM jobs WHERE state='completed'",
+                Double.class
+        );
+        return v == null ? 0.0 : v;
+    }
+
+    public int totalRetriesToday(){
+        Integer v = jdbc.queryForObject(
+                "SELECT COALESCE(SUM(attempts),0) FROM jobs WHERE date(updated_at)=date('now')",
+                Integer.class
+        );
+        return v == null ? 0 : v;
     }
 }
